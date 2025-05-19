@@ -645,8 +645,13 @@ static void __init memory_map_top_down(unsigned long map_start,
 	 */
 	addr = memblock_phys_alloc_range(PMD_SIZE, PMD_SIZE, map_start,
 					 map_end);
-	memblock_phys_free(addr, PMD_SIZE);
-	real_end = addr + PMD_SIZE;
+	if (!addr) {
+		pr_warn("Failed to release memory for alloc_low_pages()");
+		real_end = max(map_start, ALIGN_DOWN(map_end, PMD_SIZE));
+	} else {
+		memblock_phys_free(addr, PMD_SIZE);
+		real_end = addr + PMD_SIZE;
+	}
 
 	/* step_size need to be small so pgt_buf from BRK could cover it */
 	step_size = PMD_SIZE;
@@ -1080,7 +1085,8 @@ struct execmem_info __init *execmem_arch_setup(void)
 
 	start = MODULES_VADDR + offset;
 
-	if (IS_ENABLED(CONFIG_ARCH_HAS_EXECMEM_ROX)) {
+	if (IS_ENABLED(CONFIG_ARCH_HAS_EXECMEM_ROX) &&
+	    cpu_feature_enabled(X86_FEATURE_PSE)) {
 		pgprot = PAGE_KERNEL_ROX;
 		flags = EXECMEM_KASAN_SHADOW | EXECMEM_ROX_CACHE;
 	} else {

@@ -113,7 +113,7 @@ static u16 pcie_bwctrl_select_speed(struct pci_dev *port, enum pci_bus_speed spe
 		up_read(&pci_bus_sem);
 	}
 	if (!supported_speeds)
-		return PCI_EXP_LNKCAP2_SLS_2_5GB;
+		supported_speeds = PCI_EXP_LNKCAP2_SLS_2_5GB;
 
 	return pcie_supported_speeds2target_speed(supported_speeds & desired_speeds);
 }
@@ -294,6 +294,10 @@ static int pcie_bwnotif_probe(struct pcie_device *srv)
 	struct pci_dev *port = srv->port;
 	int ret;
 
+	/* Can happen if we run out of bus numbers during enumeration. */
+	if (!port->subordinate)
+		return -ENODEV;
+
 	struct pcie_bwctrl_data *data = devm_kzalloc(&srv->device,
 						     sizeof(*data), GFP_KERNEL);
 	if (!data)
@@ -303,14 +307,17 @@ static int pcie_bwnotif_probe(struct pcie_device *srv)
 	if (ret)
 		return ret;
 
-	ret = devm_request_irq(&srv->device, srv->irq, pcie_bwnotif_irq,
-			       IRQF_SHARED, "PCIe bwctrl", srv);
-	if (ret)
-		return ret;
-
 	scoped_guard(rwsem_write, &pcie_bwctrl_setspeed_rwsem) {
 		scoped_guard(rwsem_write, &pcie_bwctrl_lbms_rwsem) {
-			port->link_bwctrl = no_free_ptr(data);
+			port->link_bwctrl = data;
+
+			ret = request_irq(srv->irq, pcie_bwnotif_irq,
+					  IRQF_SHARED, "PCIe bwctrl", srv);
+			if (ret) {
+				port->link_bwctrl = NULL;
+				return ret;
+			}
+
 			pcie_bwnotif_enable(srv);
 		}
 	}
@@ -331,11 +338,15 @@ static void pcie_bwnotif_remove(struct pcie_device *srv)
 
 	pcie_cooling_device_unregister(data->cdev);
 
-	pcie_bwnotif_disable(srv->port);
+	scoped_guard(rwsem_write, &pcie_bwctrl_setspeed_rwsem) {
+		scoped_guard(rwsem_write, &pcie_bwctrl_lbms_rwsem) {
+			pcie_bwnotif_disable(srv->port);
 
-	scoped_guard(rwsem_write, &pcie_bwctrl_setspeed_rwsem)
-		scoped_guard(rwsem_write, &pcie_bwctrl_lbms_rwsem)
+			free_irq(srv->irq, srv);
+
 			srv->port->link_bwctrl = NULL;
+		}
+	}
 }
 
 static int pcie_bwnotif_suspend(struct pcie_device *srv)

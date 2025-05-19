@@ -814,11 +814,6 @@ int hns_roce_mtr_map(struct hns_roce_dev *hr_dev, struct hns_roce_mtr *mtr,
 	for (i = 0, mapped_cnt = 0; i < mtr->hem_cfg.region_count &&
 	     mapped_cnt < page_cnt; i++) {
 		r = &mtr->hem_cfg.region[i];
-		/* if hopnum is 0, no need to map pages in this region */
-		if (!r->hopnum) {
-			mapped_cnt += r->count;
-			continue;
-		}
 
 		if (r->offset + r->count > page_cnt) {
 			ret = -EINVAL;
@@ -1003,7 +998,7 @@ static bool is_buf_attr_valid(struct hns_roce_dev *hr_dev,
 	if (attr->region_count > ARRAY_SIZE(attr->region) ||
 	    attr->region_count < 1 || attr->page_shift < HNS_HW_PAGE_SHIFT) {
 		ibdev_err(ibdev,
-			  "invalid buf attr, region count %d, page shift %u.\n",
+			  "invalid buf attr, region count %u, page shift %u.\n",
 			  attr->region_count, attr->page_shift);
 		return false;
 	}
